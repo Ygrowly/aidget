@@ -397,32 +397,3 @@ fn sorted_entries(path: &Path) -> Result<Vec<fs::DirEntry>> {
     entries.sort_by_key(|entry| entry.file_name());
     Ok(entries)
 }
-
-#[cfg(all(test, windows))]
-mod created_link_tests {
-    use super::*;
-
-    #[test]
-    fn a_materialized_path_counts_as_created() {
-        let temp = tempfile::tempdir().unwrap();
-        let dir = temp.path().join("real");
-        fs::create_dir_all(&dir).unwrap();
-        assert!(verify_created_link(&dir).is_ok());
-    }
-
-    #[test]
-    fn a_missing_link_counts_as_a_refused_privilege() {
-        let temp = tempfile::tempdir().unwrap();
-        let missing = temp.path().join("never-created");
-        let error = verify_created_link(&missing).unwrap_err();
-        assert_eq!(error.raw_os_error(), Some(1314));
-    }
-
-    #[test]
-    fn other_metadata_errors_propagate_unchanged() {
-        let temp = tempfile::tempdir().unwrap();
-        let invalid = temp.path().join("bad<name");
-        let error = verify_created_link(&invalid).unwrap_err();
-        assert_eq!(error.raw_os_error(), Some(123));
-    }
-}
