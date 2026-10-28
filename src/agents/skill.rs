@@ -216,17 +216,14 @@ fn create_entry(path: &Path, source: &Path) -> Result<()> {
     // Match Magpie: a privileged symlink first, a junction when Windows
     // refuses the privilege, then a marked copy when neither link is possible.
     let link_error = match std::os::windows::fs::symlink_dir(source, path) {
-        Ok(()) => {
-            // Some security software reports success for symlink creation
-            // without materializing the reparse point, which would fail the
-            // later rename with NotFound. Treat the missing link as a refused
-            // privilege (ERROR_PRIVILEGE_NOT_HELD) so the junction and
-            // marked-copy fallbacks still apply.
-            if fs::symlink_metadata(path).is_ok() {
-                return Ok(());
+        Ok(()) => match verify_created_link(path) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.raw_os_error() == Some(1314) => error,
+            Err(error) => {
+                let _ = remove_entry(path);
+                return Err(error.into());
             }
-            io::Error::from_raw_os_error(1314)
-        }
+        },
         Err(error) => error,
     };
     if link_error.raw_os_error() == Some(1314) {
@@ -251,6 +248,22 @@ fn create_entry(path: &Path, source: &Path) -> Result<()> {
         let _ = remove_entry(path);
     }
     written
+}
+
+#[cfg(windows)]
+fn verify_created_link(path: &Path) -> std::io::Result<()> {
+    // Some security software reports success for symlink creation without
+    // materializing the reparse point, which would fail the later rename with
+    // NotFound. A missing link counts as a refused privilege so the junction
+    // and marked-copy fallbacks apply; any other metadata error keeps its
+    // original cause instead of being masked by a fallback.
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Err(io::Error::from_raw_os_error(1314))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(windows)]
@@ -383,4 +396,33 @@ fn sorted_entries(path: &Path) -> Result<Vec<fs::DirEntry>> {
     let mut entries = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
     entries.sort_by_key(|entry| entry.file_name());
     Ok(entries)
+}
+
+#[cfg(all(test, windows))]
+mod created_link_tests {
+    use super::*;
+
+    #[test]
+    fn a_materialized_path_counts_as_created() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("real");
+        fs::create_dir_all(&dir).unwrap();
+        assert!(verify_created_link(&dir).is_ok());
+    }
+
+    #[test]
+    fn a_missing_link_counts_as_a_refused_privilege() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("never-created");
+        let error = verify_created_link(&missing).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(1314));
+    }
+
+    #[test]
+    fn other_metadata_errors_propagate_unchanged() {
+        let temp = tempfile::tempdir().unwrap();
+        let invalid = temp.path().join("bad<name");
+        let error = verify_created_link(&invalid).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(123));
+    }
 }
