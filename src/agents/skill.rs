@@ -397,3 +397,7 @@ fn sorted_entries(path: &Path) -> Result<Vec<fs::DirEntry>> {
     entries.sort_by_key(|entry| entry.file_name());
     Ok(entries)
 }
+
+#[cfg(all(test, windows))]
+#[path = "../../tests/agents/skill_created_link.rs"]
+mod created_link_tests;

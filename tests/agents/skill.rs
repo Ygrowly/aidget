@@ -214,22 +214,3 @@ fn skill_tree_hash_changes_with_nested_content() {
 
     assert_ne!(first, second);
 }
-
-#[cfg(windows)]
-#[test]
-fn an_unlinkable_destination_surfaces_the_original_error() {
-    // Reserved characters make every link and copy attempt fail with
-    // ERROR_INVALID_NAME (123); the original OS error must surface instead
-    // of a fallback masking it, and no partial entry may remain behind.
-    let temp = tempdir().unwrap();
-    let source = source(temp.path(), "skill");
-    let path = temp.path().join("agent/skills/bad<name");
-
-    let error = set_skill(&path, &source, true).unwrap_err();
-
-    assert!(
-        error.to_string().contains("123"),
-        "unexpected error: {error}"
-    );
-    assert!(!path.exists());
-}
