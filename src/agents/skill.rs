@@ -216,7 +216,17 @@ fn create_entry(path: &Path, source: &Path) -> Result<()> {
     // Match Magpie: a privileged symlink first, a junction when Windows
     // refuses the privilege, then a marked copy when neither link is possible.
     let link_error = match std::os::windows::fs::symlink_dir(source, path) {
-        Ok(()) => return Ok(()),
+        Ok(()) => {
+            // Some security software reports success for symlink creation
+            // without materializing the reparse point, which would fail the
+            // later rename with NotFound. Treat the missing link as a refused
+            // privilege (ERROR_PRIVILEGE_NOT_HELD) so the junction and
+            // marked-copy fallbacks still apply.
+            if fs::symlink_metadata(path).is_ok() {
+                return Ok(());
+            }
+            io::Error::from_raw_os_error(1314)
+        }
         Err(error) => error,
     };
     if link_error.raw_os_error() == Some(1314) {
